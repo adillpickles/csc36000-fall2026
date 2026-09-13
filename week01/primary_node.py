@@ -59,6 +59,10 @@ class Registry:
                 del self.nodes[nid]
             return list(self.nodes.values())
 
+    def remove(self, node_id: str) -> None:
+        with self.lock:
+            self.nodes.pop(str(node_id), None)
+
 
 REGISTRY = Registry(ttl_s=120)
 
@@ -122,6 +126,7 @@ def distributed_compute(payload: Dict[str, Any]) -> Dict[str, Any]:
     t0 = time.perf_counter()
 
     per_node_results: List[Dict[str, Any]] = []
+    failed_slices: List[Tuple[int, int]] = []
     total_primes = 0
     primes_sample: List[int] = []
     primes_truncated = False
@@ -167,9 +172,40 @@ def distributed_compute(payload: Dict[str, Any]) -> Dict[str, Any]:
         }
 
     with ThreadPoolExecutor(max_workers=min(32, len(nodes_sorted))) as ex:
-        futs = [ex.submit(call_node, node, sl) for node, sl in zip(nodes_sorted, slices)]
+        futs = {ex.submit(call_node, node, sl): (node, sl) for node, sl in zip(nodes_sorted, slices)}
         for f in as_completed(futs):
-            per_node_results.append(f.result())
+            node, sl = futs[f]
+            try:
+                per_node_results.append(f.result())
+            except Exception as e:
+                # Failure detection (Ch. 3): the exception/timeout is the witness
+                # that this secondary crashed or is down for maintenance.
+                print(f"[primary_node] node {node['node_id']} failed: {e}")
+                REGISTRY.remove(node["node_id"])
+                failed_slices.append(sl)
+
+    # Failure mitigation with forward recovery (Ch. 3): push the computation
+    # forward by reassigning each failed slice to a surviving secondary.
+    if failed_slices:
+        survivors = sorted(REGISTRY.active_nodes(), key=lambda n: n["node_id"])
+        if not survivors:
+            raise ValueError(f"all {len(nodes_sorted)} secondary node(s) failed; cannot complete distributed computation")
+        print(f"[primary_node] reassigning {len(failed_slices)} failed slice(s) to {len(survivors)} surviving node(s)")
+        for sl in failed_slices:
+            done = False
+            last_err = None
+            for node in list(survivors):
+                try:
+                    per_node_results.append(call_node(node, sl))
+                    done = True
+                    break
+                except Exception as e:
+                    print(f"[primary_node] surviving node {node['node_id']} also failed: {e}")
+                    last_err = e
+                    REGISTRY.remove(node["node_id"])
+                    survivors = [n for n in survivors if n["node_id"] != node["node_id"]]
+            if not done:
+                raise ValueError(f"no surviving secondary could compute slice {list(sl)}: {last_err}")
 
     per_node_results.sort(key=lambda r: r["slice"][0])
 
