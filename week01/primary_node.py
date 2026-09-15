@@ -26,7 +26,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict, List, Tuple
 from urllib.parse import urlparse
-
+import queue
 
 class Registry:
     ## Updated from 3600 to 15
@@ -150,6 +150,7 @@ def distributed_compute(payload: Dict[str, Any]) -> Dict[str, Any]:
 
         t_call0 = time.perf_counter()
 
+        ## Catches network exceptions or failure responses.
         try:
             resp = _post_json(url, req, timeout_s=30)
             if not resp.get("ok"):
@@ -178,10 +179,47 @@ def distributed_compute(payload: Dict[str, Any]) -> Dict[str, Any]:
             "primes_truncated": bool(resp.get("primes_truncated", False)),
         }
 
-    with ThreadPoolExecutor(max_workers=min(32, len(nodes_sorted))) as ex:
-        futs = [ex.submit(call_node, node, sl) for node, sl in zip(nodes_sorted, slices)]
-        for f in as_completed(futs):
-            per_node_results.append(f.result())
+    # Improves forward recovery, this is failure mitigation
+    task_queue = queue.Queue()
+    for sl in slices:
+        task_queue.put(sl)
+
+    results_lock = threading.Lock()
+
+    def worker_loop():
+        while True:
+            try:
+                sl = task_queue.get_nowait()
+            except queue.Empty:
+                break
+
+            success = False
+            while not success:
+                active = REGISTRY.active_nodes()
+                if not active:
+                    task_queue.task_done()
+                    raise RuntimeError("All secondary nodes failed; forward recovery impossible.")
+
+                # Pick an available active node
+                node = active[int(time.time()) % len(active)]
+                try:
+                    res = call_node(node, sl)
+                    with results_lock:
+                        per_node_results.append(res)
+                    success = True
+                except Exception as e:
+                    # Node crashed and was evicted inside call_node
+                    # Forward recovery: stay in the loop to retry this slice on another node
+                    print(f"[primary_node] Re-routing slice {sl} away from failed node...")
+                    time.sleep(0.5)
+
+            task_queue.task_done()
+
+    threads = [threading.Thread(target=worker_loop) for _ in range(min(16, len(nodes_sorted) * 2))]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
 
     per_node_results.sort(key=lambda r: r["slice"][0])
 
