@@ -95,6 +95,14 @@ Stdout is the prime count. Elapsed time prints on stderr when you pass `--time`.
 
 Use `--mode count` for large ranges so you are not shipping huge lists of primes over the network. Threads often do **not** speed up this CPU-bound work in CPython (the GIL). Processes usually do, on one machine. Distribution adds network and coordination overhead, but can use many laptops at once.
 
+## Run the tests
+
+From the `week01` directory:
+
+```bash
+python3 -m unittest -v
+```
+
 ## Troubleshooting
 
 Registration is **outbound** (you → instructor). Compute is **inbound** (instructor → you). The first can work while the second fails.
