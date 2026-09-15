@@ -122,6 +122,7 @@ def distributed_compute(payload: Dict[str, Any]) -> Dict[str, Any]:
     t0 = time.perf_counter()
 
     per_node_results: List[Dict[str, Any]] = []
+    failed_slices: List[Tuple[int, int]] = [] # tuple to store work that was not able to be completed 
     total_primes = 0
     primes_sample: List[int] = []
     primes_truncated = False
@@ -142,10 +143,11 @@ def distributed_compute(payload: Dict[str, Any]) -> Dict[str, Any]:
             "include_per_chunk": False,
         }
         req = {k: v for k, v in req.items() if v is not None}
+
         # use a try catch block to check if any of the worker nodes failed 
         try: 
             t_call0 = time.perf_counter()
-            resp = _post_json(url, req, timeout_s=3600)
+            resp = _post_json(url, req, timeout_s=10)
             t_call1 = time.perf_counter()
     
             if not resp.get("ok"):
@@ -167,7 +169,7 @@ def distributed_compute(payload: Dict[str, Any]) -> Dict[str, Any]:
                 "primes_truncated": bool(resp.get("primes_truncated", False)),
             }
         except Exception as e: 
-            print(f"Worker node {node['node_id'] has failed:/nError:{e}")
+            print(f"Worker node {node['node_id']} has failed:\nError:{e}")
             return {"error": True, "slice": sl, "node_id": node["node_id"]}
 
 
@@ -177,18 +179,18 @@ def distributed_compute(payload: Dict[str, Any]) -> Dict[str, Any]:
             res=f.result()
             # Check the dictionary for failed worker nodes and remove them 
             if res.get("error"):
-                failed_slices.append(res["slice"] # append undone work to dictonary 
+                failed_slices.append(res["slice"]) # append undone work to dictonary 
                 node_id=res["node_id"]
                 if node_id in REGISTRY.nodes:
-                    del REGISTRY.nodes["node_id"] # if node is still registered remove it 
+                    del REGISTRY.nodes[node_id] # if node is still registered remove it 
             
-            else 
+            else:
                 per_node_results.append(f.result())
         
     # REASSIGN UNDONE WORK TO WORKING NODES 
 
     if len(failed_slices)!=0: # check if failed slices list is empty if not we have work to reassign 
-        print(f"Reassinging work for len{failed_slices)} crashed worker nodes.")
+        print(f"Reassinging work for {len(failed_slices)} crashed worker nodes.")
         active_nodes= REGISTRY.active_nodes()
         #check if any nodes survived at all if not send error 
         if len(active_nodes)==0:
@@ -196,17 +198,17 @@ def distributed_compute(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 # loop through failed_slices dictonary to assign new nodes
 
-for index,slices in eneumerate(failed_slices):
-    new_worker=active_nodes[index % len(active_nodes)] # make sure worker index loops back to 0 when reaches end of list 
-    res=call_node(new_wroker,slices)
-    if not res.get("error"):
-        per_node_results.append(res)
+        for index,slices in enumerate(failed_slices):
+            new_worker=active_nodes[index % len(active_nodes)] # make sure worker index loops back to 0 when reaches end of list 
+            res=call_node(new_worker,slices)
+            if not res.get("error"):
+                per_node_results.append(res)
     
 
  
 
 
-per_node_results.sort(key=lambda r: r["slice"][0])
+    per_node_results.sort(key=lambda r: r["slice"][0])
 
     for r in per_node_results:
         total_primes += int(r["total_primes"])
