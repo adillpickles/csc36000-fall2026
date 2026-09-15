@@ -29,10 +29,15 @@ from urllib.parse import urlparse
 
 
 class Registry:
-    def __init__(self, ttl_s: int = 3600):
+    ## Updated from 3600 to 15
+    def __init__(self, ttl_s: int = 15):
         self.ttl_s = ttl_s
         self.lock = threading.Lock()
         self.nodes: Dict[str, Dict[str, Any]] = {}
+
+    def remove(self, node_id: str) -> None:
+        with self.lock:
+            self.nodes.pop(node_id, None)
 
     def upsert(self, node: Dict[str, Any]) -> Dict[str, Any]:
         node_id = str(node["node_id"])
@@ -144,11 +149,18 @@ def distributed_compute(payload: Dict[str, Any]) -> Dict[str, Any]:
         req = {k: v for k, v in req.items() if v is not None}
 
         t_call0 = time.perf_counter()
-        resp = _post_json(url, req, timeout_s=3600)
-        t_call1 = time.perf_counter()
 
-        if not resp.get("ok"):
-            raise RuntimeError(f"node {node['node_id']} error: {resp}")
+        try:
+            resp = _post_json(url, req, timeout_s=30)
+            if not resp.get("ok"):
+                raise RuntimeError(f"node error: {resp}")
+        except Exception as e:
+            # Witness of failure: connection dropped, refused, or timed out
+            print(f"[primary_node] Node {node['node_id']} unreachable or failed: {e}")
+            REGISTRY.remove(node["node_id"])  # <--- Evict the crashed node here
+            raise
+
+        t_call1 = time.perf_counter()
         
         node_elapsed_s = float(resp.get("elapsed_seconds", 0.0))
         print(f"Node ID: {node['node_id']} completed in: {node_elapsed_s}")
@@ -258,6 +270,14 @@ class Handler(BaseHTTPRequestHandler):
             print(f"[primary_node] Added node: {payload} to registry")
             return self._send_json({"ok": True, "node": rec})
 
+        if parsed.path == "/deregister":
+            node_id = payload.get("node_id")
+            if not node_id:
+                return self._send_json({"ok": False, "error": "missing node_id"}, code=400)
+            REGISTRY.remove(str(node_id))
+            print(f"[primary_node] Deregistered node: {node_id}")
+            return self._send_json({"ok": True, "deregistered": node_id})
+        
         if parsed.path == "/compute":
             try:
                 for k in ("low", "high"):
@@ -278,7 +298,8 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="Primary coordinator for distributed prime computation.")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=9200)
-    ap.add_argument("--ttl", type=int, default=3600, help="Seconds to keep node registrations alive (default 3600).")
+    # Updated tracker
+    ap.add_argument("--ttl", type=int, default=5, help="Seconds to keep node registrations alive (default 5).")
     args = ap.parse_args()
 
     global REGISTRY

@@ -244,7 +244,8 @@ def start_registration_loop(
     host: str,
     port: int,
     *,
-    interval_s: int = 3600,
+    ## Bring down interval to detect failure ASAP
+    interval_s: int = 5,
 ) -> None:
     """
     Background heartbeat: periodically re-register so primary can expire stale nodes.
@@ -363,7 +364,8 @@ def main() -> None:
 
     ap.add_argument("--primary", default=None, help="Primary coordinator URL, e.g. http://134.74.160.1:9200")
     ap.add_argument("--public-host", default=None, help="Host/IP to advertise to primary (default: auto-detect).")
-    ap.add_argument("--register-interval", type=int, default=3600, help="Seconds between heartbeats (default 3600).")
+    # Updated heartbeat tracker here
+    ap.add_argument("--register-interval", type=int, default=5, help="Seconds between heartbeats (default 5).")
 
     args = ap.parse_args()
 
