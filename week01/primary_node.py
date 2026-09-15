@@ -142,36 +142,71 @@ def distributed_compute(payload: Dict[str, Any]) -> Dict[str, Any]:
             "include_per_chunk": False,
         }
         req = {k: v for k, v in req.items() if v is not None}
+        # use a try catch block to check if any of the worker nodes failed 
+        try: 
+            t_call0 = time.perf_counter()
+            resp = _post_json(url, req, timeout_s=3600)
+            t_call1 = time.perf_counter()
+    
+            if not resp.get("ok"):
+                raise RuntimeError(f"node {node['node_id']} error: {resp}")
+            
+            node_elapsed_s = float(resp.get("elapsed_seconds", 0.0))
+            print(f"Node ID: {node['node_id']} completed in: {node_elapsed_s}")
+    
+            return {
+                "node_id": node["node_id"],
+                "node": {"host": host, "port": port, "cpu_count": node.get("cpu_count", 1)},
+                "slice": list(sl),
+                "round_trip_s": t_call1 - t_call0,
+                "node_elapsed_s": node_elapsed_s,
+                "node_sum_chunk_s": float(resp.get("sum_chunk_compute_seconds", 0.0)),
+                "total_primes": int(resp.get("total_primes", 0)),
+                "max_prime": int(resp.get("max_prime", -1)),
+                "primes": resp.get("primes", None),
+                "primes_truncated": bool(resp.get("primes_truncated", False)),
+            }
+        except Exception as e: 
+            print(f"Worker node {node['node_id'] has failed:/nError:{e}")
+            return {"error": True, "slice": sl, "node_id": node["node_id"]}
 
-        t_call0 = time.perf_counter()
-        resp = _post_json(url, req, timeout_s=3600)
-        t_call1 = time.perf_counter()
-
-        if not resp.get("ok"):
-            raise RuntimeError(f"node {node['node_id']} error: {resp}")
-        
-        node_elapsed_s = float(resp.get("elapsed_seconds", 0.0))
-        print(f"Node ID: {node['node_id']} completed in: {node_elapsed_s}")
-
-        return {
-            "node_id": node["node_id"],
-            "node": {"host": host, "port": port, "cpu_count": node.get("cpu_count", 1)},
-            "slice": list(sl),
-            "round_trip_s": t_call1 - t_call0,
-            "node_elapsed_s": node_elapsed_s,
-            "node_sum_chunk_s": float(resp.get("sum_chunk_compute_seconds", 0.0)),
-            "total_primes": int(resp.get("total_primes", 0)),
-            "max_prime": int(resp.get("max_prime", -1)),
-            "primes": resp.get("primes", None),
-            "primes_truncated": bool(resp.get("primes_truncated", False)),
-        }
 
     with ThreadPoolExecutor(max_workers=min(32, len(nodes_sorted))) as ex:
         futs = [ex.submit(call_node, node, sl) for node, sl in zip(nodes_sorted, slices)]
         for f in as_completed(futs):
-            per_node_results.append(f.result())
+            res=f.result()
+            # Check the dictionary for failed worker nodes and remove them 
+            if res.get("error"):
+                failed_slices.append(res["slice"] # append undone work to dictonary 
+                node_id=res["node_id"]
+                if node_id in REGISTRY.nodes:
+                    del REGISTRY.nodes["node_id"] # if node is still registered remove it 
+            
+            else 
+                per_node_results.append(f.result())
+        
+    # REASSIGN UNDONE WORK TO WORKING NODES 
 
-    per_node_results.sort(key=lambda r: r["slice"][0])
+    if len(failed_slices)!=0: # check if failed slices list is empty if not we have work to reassign 
+        print(f"Reassinging work for len{failed_slices)} crashed worker nodes.")
+        active_nodes= REGISTRY.active_nodes()
+        #check if any nodes survived at all if not send error 
+        if len(active_nodes)==0:
+            raise RuntimeError("All nodes crashed !")
+
+# loop through failed_slices dictonary to assign new nodes
+
+for index,slices in eneumerate(failed_slices):
+    new_worker=active_nodes[index % len(active_nodes)] # make sure worker index loops back to 0 when reaches end of list 
+    res=call_node(new_wroker,slices)
+    if not res.get("error"):
+        per_node_results.append(res)
+    
+
+ 
+
+
+per_node_results.sort(key=lambda r: r["slice"][0])
 
     for r in per_node_results:
         total_primes += int(r["total_primes"])
