@@ -144,7 +144,7 @@ def distributed_compute(payload: Dict[str, Any]) -> Dict[str, Any]:
         req = {k: v for k, v in req.items() if v is not None}
 
         t_call0 = time.perf_counter()
-        resp = _post_json(url, req, timeout_s=3600)
+        resp = _post_json(url, req, timeout_s=10) #updated timeout duration to 10s instead of 3600s
         t_call1 = time.perf_counter()
 
         if not resp.get("ok"):
@@ -167,9 +167,42 @@ def distributed_compute(payload: Dict[str, Any]) -> Dict[str, Any]:
         }
 
     with ThreadPoolExecutor(max_workers=min(32, len(nodes_sorted))) as ex:
-        futs = [ex.submit(call_node, node, sl) for node, sl in zip(nodes_sorted, slices)]
+        futs = {
+            ex.submit(call_node, node, sl): (node,sl)
+            for node, sl in zip(nodes_sorted, slices)}
+        
         for f in as_completed(futs):
-            per_node_results.append(f.result())
+            node,sl=futs[f]
+            
+            try:
+                result=f.result()
+                per_node_results.append(result)
+                
+            except Exception as e:
+                print(f"Node {node['node_id']} failed: {e}")
+                #failure detected, now need to check other nodes as backup and reassign work
+                for backup_node in nodes_sorted:
+                    if backup_node["node_id"] != node["node_id"]:
+                        try:
+                            print(
+                                f"Retrying number range {sl} on backup node: "
+                                f"{backup_node['node_id']}"
+                                )
+                            
+                            result = call_node(backup_node, sl)
+                            per_node_results.append(result)
+                            
+                            print(
+                                f"Computed number range {sl} successfully completed by "
+                                f"node: {backup_node['node_id']}"
+                                )
+                            break
+                        
+                        except Exception:
+                            print(
+                                f"The Backup node {backup_node['node_id']} "
+                                f"also failed."
+                                )
 
     per_node_results.sort(key=lambda r: r["slice"][0])
 
