@@ -1,0 +1,246 @@
+# Design: key/value platform
+
+Group: Group 2
+
+The roster is how the group records who owns which plugin.
+
+## Roster
+
+Each person lists a different plugin filename.
+
+| Student name | CUNY alias | Plugin filename | Feature branch |
+| --- | --- | --- | --- |
+| Adil Ahmed | ADIL.AHMED22 | request_routing.py | adil/request_routing |
+| Amanda Farghli | Amanda.Farghli66 | partitioning.py |  |
+| Almasur Antor | almasur.antor49 | session_models.py |  |
+| Mamuna Chaudhry | mamuna.chaudhry91 | replication.py |  |
+| Oluwadamilola Babajide | oluwadamilola.babajide11 | write_completion.py |  |
+
+The other five files (leader_replication.py, conflicts.py, processing_guarantees.py, leader_election.py, atomic_commit.py) are not claimed and stay as the provided stubs.
+
+## Platform reminder
+
+Values are opaque bytes, and so are keys. `N` is `len(node.nodes)`, whatever appears in `--peers` or `cluster.json`, so no plugin may assume three nodes. A forwarded Write or Read carries `hop`, and every plugin stops at 8. Every node reads the same membership list, but each process keeps its own store, directory and fault flags.
+
+
+## Per owned plugin
+
+### request_routing.py (Adil Ahmed)
+
+**Plugin file:** request_routing.py
+
+**Modes we will implement** (see that plugin's section in `week06/README.md`): FORWARD, DIRECTORY_TIER, CLIENT_AWARE. All three.
+
+**One history we will demo** (the fault or change, the Writes/Reads, the bytes you expect on which node): three nodes, key `alpha` is owned by n2, and the client sends the Write to n0, which does not own it.
+
+- FORWARD. n0 sends the Write on to n2 with `hop` 1. n2 stores `one`. The client gets `ok=True owner=n2`. A Read on n2 returns `one`, and a Read sent to n0 with FORWARD is also answered with `one` from n2.
+- CLIENT_AWARE. The same kind of Write sent to n1 comes back `ok=False error='not owner' owner=n2`. Nothing is stored. The Read on n2 still returns the old bytes, so the refused call did not put `nope` anywhere.
+- DIRECTORY_TIER. n0 looks `alpha` up in its directory, finds n2 and sends the Write there. n2 stores `two`. If the lookup is stale (n0 thinks the owner is n1, but the key was moved to n2), n1 answers `not owner` and names n2, n0 retries once against n2, and the bytes land on n2. The Write is not dropped.
+- Hop limit. Two nodes that disagree about the owner (n0 says n1, n1 says n0) pass the Write back and forth. Each pass adds 1 to `hop`. When it passes 8 the Write fails with `hop limit` instead of looping.
+
+**Commands** (provided client, against a `node` cluster): see the Demo section, steps 3 to 8. The routing mode goes on the command with `--request-routing`, for example:
+
+```
+python3 -m platform.client --addr 127.0.0.1:9600 write alpha one --partitioning DIRECTORY --request-routing FORWARD
+python3 -m platform.client --addr 127.0.0.1:9601 write alpha nope --partitioning DIRECTORY --request-routing CLIENT_AWARE
+python3 -m platform.client --addr 127.0.0.1:9600 write alpha two --partitioning DIRECTORY --request-routing DIRECTORY_TIER
+```
+
+**A mode combination that should fail, and the error Write or Read returns:** CLIENT_AWARE with a Write on a node that is not the owner returns `ok=False error='not owner'` and names the owner. FORWARD between two nodes that each point at the other returns `ok=False error='hop limit'`. A Write with no `--request-routing` flag on a non owner also returns `not owner`, which is the node's own default.
+
+### partitioning.py (Amanda Farghli)
+
+**Plugin file:** partitioning.py  
+**Modes we will implement:**  
+**One history we will demo:**  
+**Commands:**  
+**A mode combination that should fail, and the error Write or Read returns:**  
+
+### session_models.py (Almasur Antor)
+
+**Plugin file:** session_models.py  
+**Modes we will implement:**  
+**One history we will demo:**  
+**Commands:**  
+**A mode combination that should fail, and the error Write or Read returns:**  
+
+### replication.py (Mamuna Chaudhry)
+
+**Plugin file:** replication.py  
+**Modes we will implement:**  
+**One history we will demo:**  
+**Commands:**  
+**A mode combination that should fail, and the error Write or Read returns:**  
+
+### write_completion.py (Oluwadamilola Babajide)
+
+**Plugin file:** write_completion.py  
+**Modes we will implement:**  
+**One history we will demo:**  
+**Commands:**  
+**A mode combination that should fail, and the error Write or Read returns:**  
+
+## Tradeoffs
+
+Each row is one fault or change and what that mode gives up compared with the other modes of the same plugin.
+
+### partitioning.py
+
+*Think Distributed Systems* ch. 7; *Designing Data-Intensive Applications* ch. 7.
+
+| Mode | Fault or change | What Write does | What Read returns on which node | What you gave up |
+| --- | --- | --- | --- | --- |
+| HASH_MOD |  |  |  |  |
+| KEY_RANGE |  |  |  |  |
+| SLOTS |  |  |  |  |
+| DIRECTORY |  |  |  |  |
+| ITEM |  |  |  |  |
+
+### replication.py
+
+*Think Distributed Systems* §8.4.4.
+
+| Mode | Fault or change | What Write does | What Read returns on which node | What you gave up |
+| --- | --- | --- | --- | --- |
+| STATE |  |  |  |  |
+| LOG |  |  |  |  |
+| LOG_WITH_SNAPSHOT |  |  |  |  |
+
+### write_completion.py
+
+*Think Distributed Systems* §8.4.3; *Database Internals* ch. 11.
+
+| Mode | Fault or change | What Write does | What Read returns on which node | What you gave up |
+| --- | --- | --- | --- | --- |
+| ACK_ALL |  |  |  |  |
+| ACK_ONE |  |  |  |  |
+| ACK_QUORUM |  |  |  |  |
+
+### session_models.py
+
+*Database Internals* ch. 11 (session models).
+
+| Mode | Fault or change | What Write does | What Read returns on which node | What you gave up |
+| --- | --- | --- | --- | --- |
+| READ_OWN_WRITES |  |  |  |  |
+| MONOTONIC_READS |  |  |  |  |
+| NO_SESSION |  |  |  |  |
+
+### request_routing.py
+
+*Designing Data-Intensive Applications* ch. 7 (request routing). A Write sent to a node that does not own the key. In all rows below, `alpha` is owned by n2 and the Write is sent to n0 or n1.
+
+| Mode | Fault or change | What Write does | What Read returns on which node | What you gave up |
+| --- | --- | --- | --- | --- |
+| FORWARD | Write `alpha=one` sent to n0, which is not the owner | n0 copies the request with `hop` + 1 and sends it to n2. n2 stores it, and the client sees `ok=True owner=n2` | `one` on n2. A Read sent to n0 with FORWARD is forwarded and returns `one` with `served_by=n2` | An extra hop on every request. If the owner is paused or unreachable the Write fails with `owner unreachable` and stores nothing |
+| FORWARD | Two nodes point at each other for key `loop` | Each pass adds 1 to `hop`. After 8 the Write returns `ok=False error='hop limit'` | Nothing was stored (Status shows `key_count=0` on both nodes) | The forwarder trusts its own idea of the owner, so a wrong directory shows up as a loop that only the hop limit stops |
+| DIRECTORY_TIER | Write `alpha=two` sent to n0, directory is current | n0 looks up the owner (n2) and sends there. `ok=True owner=n2` | `two` on n2 | Needs a directory that every node keeps up to date. Costs one lookup before the send |
+| DIRECTORY_TIER | Stale lookup: n0 thinks `beta` is on n1, but it moved to n2 | n0 sends to n1, n1 answers `not owner` and names n2, n0 retries once to n2. `ok=True owner=n2` | `one` on n2. A Read sent straight to n1 returns `ok=False error='not owner'`, since n1 never stored it | One extra round trip when the lookup is stale. Only one retry, so a second stale answer is returned to the client as the error |
+| CLIENT_AWARE | Write `alpha=nope` sent to n1 | Returns `ok=False error='not owner' owner=n2` and does not forward | `alpha` on n2 is unchanged (still the earlier bytes). The refused call stored nothing | The client has to learn the owner and send again, but the servers do no forwarding at all |
+
+## Protocol notes
+
+**request_routing.py (Adil).** What is on the wire is the normal `Write` or `Read` RPC, with the `hop` field of the request. `request_routing.on_write` runs only when the receiving node is not the owner. It does one of three things depending on `--request-routing`.
+
+- FORWARD: build a copy of the request with `hop` + 1 (`copy_with_hop` in `util.py`) and call `node.rpc(owner, "Write", copy)`. Before sending, check `hop`. If it is already 8 or more, return `ok=False error='hop limit'` and do not send. The reply from the owner is passed back to the client as it is. If `node.rpc` raises `RpcFailed`, return `ok=False error='owner unreachable'`. Read works the same way with `"Read"`.
+- DIRECTORY_TIER: the owner that `node.py` hands to the plugin comes from this node's own directory, so that is the lookup. Send the Write there with `hop` + 1. If the node that receives it is not the owner, it answers `not owner` and puts the owner it believes in the `owner` field. The first sender then sends the same bytes one more time to that node, and that is the only retry. A node that gets a request whose `hop` is already above 0 does not route again. It answers `not owner` and stops, so two stale directories cannot start a chain of retries.
+- CLIENT_AWARE: return `ok=False error='not owner' owner=<owner>` right away. Nothing is forwarded and nothing is stored.
+
+Because `node.rpc` goes through the fault flags, a paused or dropped owner shows up as `RpcFailed` and not as a hang.
+
+## Demo
+
+All steps use the provided client from `week06/`. The commands in steps 1 to 8 were run against a real three node cluster started from a copy of `week06/`, and the outputs shown are what came back. The pin command goes to every node because the partitioning plugin used for the check keeps pins on each node separately. If the group's partitioning plugin shares pins between nodes, the pin lines can become one command.
+
+1. Start three nodes, one terminal each.
+
+   ```
+   cd week06
+   python3 -m platform.node --node-id n0 --port 9600 --config cluster.json
+   python3 -m platform.node --node-id n1 --port 9601 --config cluster.json
+   python3 -m platform.node --node-id n2 --port 9602 --config cluster.json
+   ```
+
+   Each prints `[nX] listening on 127.0.0.1:960X peers=['n0', 'n1', 'n2']`. Check one with `python3 -m platform.client --addr 127.0.0.1:9600 health`, which prints `ok=True node_id=n0`.
+
+2. Pin `alpha` to n2 on every node, so all three agree that n2 is the owner.
+
+   ```
+   python3 -m platform.client --addr 127.0.0.1:9600 pin alpha n2 --partitioning DIRECTORY
+   python3 -m platform.client --addr 127.0.0.1:9601 pin alpha n2 --partitioning DIRECTORY
+   python3 -m platform.client --addr 127.0.0.1:9602 pin alpha n2 --partitioning DIRECTORY
+   ```
+
+   Each prints `ok=True peers=['n0', 'n1', 'n2']`.
+
+3. FORWARD. Write on n0, then Read on the owner and on n0.
+
+   ```
+   python3 -m platform.client --addr 127.0.0.1:9600 write alpha one --partitioning DIRECTORY --request-routing FORWARD
+   python3 -m platform.client --addr 127.0.0.1:9602 read alpha --partitioning DIRECTORY
+   python3 -m platform.client --addr 127.0.0.1:9600 read alpha --partitioning DIRECTORY --request-routing FORWARD
+   ```
+
+   Output: `ok=True error='' owner=n2 acked_by=['n2']`, then `ok=True error='' found=True served_by=n2 value=one` twice.
+
+4. CLIENT_AWARE. Write on n1, then check that n2 did not change.
+
+   ```
+   python3 -m platform.client --addr 127.0.0.1:9601 write alpha nope --partitioning DIRECTORY --request-routing CLIENT_AWARE
+   python3 -m platform.client --addr 127.0.0.1:9602 read alpha --partitioning DIRECTORY
+   ```
+
+   Output: `ok=False error='not owner' owner=n2 acked_by=[]`, then `ok=True error='' found=True served_by=n2 value=one`.
+
+5. DIRECTORY_TIER with a current lookup.
+
+   ```
+   python3 -m platform.client --addr 127.0.0.1:9600 write alpha two --partitioning DIRECTORY --request-routing DIRECTORY_TIER
+   python3 -m platform.client --addr 127.0.0.1:9602 read alpha --partitioning DIRECTORY
+   ```
+
+   Output: `ok=True error='' owner=n2 acked_by=['n2']`, then `value=two` on n2.
+
+6. DIRECTORY_TIER with a stale lookup. n0 is told `beta` is on n1, while n1 and n2 know it is on n2.
+
+   ```
+   python3 -m platform.client --addr 127.0.0.1:9600 pin beta n1 --partitioning DIRECTORY
+   python3 -m platform.client --addr 127.0.0.1:9601 pin beta n2 --partitioning DIRECTORY
+   python3 -m platform.client --addr 127.0.0.1:9602 pin beta n2 --partitioning DIRECTORY
+   python3 -m platform.client --addr 127.0.0.1:9600 write beta one --partitioning DIRECTORY --request-routing DIRECTORY_TIER
+   python3 -m platform.client --addr 127.0.0.1:9602 read beta --partitioning DIRECTORY
+   ```
+
+   Output: the Write is `ok=True error='' owner=n2 acked_by=['n2']` even though n0 first asked n1, and the Read on n2 is `value=one`. A Read sent to n1 (`--addr 127.0.0.1:9601 read beta --partitioning DIRECTORY`) gives `ok=False error='not owner' found=False served_by=n1`, because n1 only passed the Write along.
+
+7. Hop limit. n0 says `loop` is on n1, and n1 says it is on n0.
+
+   ```
+   python3 -m platform.client --addr 127.0.0.1:9600 pin loop n1 --partitioning DIRECTORY
+   python3 -m platform.client --addr 127.0.0.1:9601 pin loop n0 --partitioning DIRECTORY
+   python3 -m platform.client --addr 127.0.0.1:9600 write loop x --partitioning DIRECTORY --request-routing FORWARD
+   ```
+
+   Output: `ok=False error='hop limit' owner=n1 acked_by=[]`.
+
+8. Owner paused. Pause n2, send a FORWARD Write to n0, unpause, send it again.
+
+   ```
+   python3 -m platform.client --addr 127.0.0.1:9602 fault --pause on
+   python3 -m platform.client --addr 127.0.0.1:9600 write alpha three --partitioning DIRECTORY --request-routing FORWARD
+   python3 -m platform.client --addr 127.0.0.1:9602 fault --pause off
+   python3 -m platform.client --addr 127.0.0.1:9600 write alpha three --partitioning DIRECTORY --request-routing FORWARD
+   python3 -m platform.client --addr 127.0.0.1:9602 read alpha --partitioning DIRECTORY
+   ```
+
+   Output: `ok=True pause=True drop_to=[] delay_ms=0`, then the first Write is `ok=False error='owner unreachable' owner=n2 acked_by=[]`, then `ok=True pause=False ...`, then the second Write is `ok=True error='' owner=n2 acked_by=['n2']`, and the Read is `value=three`.
+
+9. The other plugins add their own steps here once their code is in.
+
+## What we are not building this week
+
+We are not building a full Raft, MVCC, or any application data type, and no web UI, TLS or real database. State lives in memory on the processes. The five plugins nobody in the group owns (leader_replication, conflicts, processing_guarantees, leader_election, atomic_commit) stay as the provided stubs, so the group does not do leader election, conflict merging, exactly once processing or two phase commit this week.
+
+## Git
+
+Each plugin change is a pull request from the named feature branch. The team lead merges. The group repo is the submission.
