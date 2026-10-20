@@ -12,7 +12,7 @@ Each person lists a different plugin filename.
 | --- | --- | --- | --- |
 | Adil Ahmed | ADIL.AHMED22 | request_routing.py | adil/request_routing |
 | Amanda Farghli | Amanda.Farghli66 | partitioning.py |  |
-| Almasur Antor | almasur.antor49 | session_models.py |  |
+| Almasur Antor | almasur.antor49 | session_models.py | almasur.antor49/session_models |
 | Mamuna Chaudhry | mamuna.chaudhry91 | replication.py |  |
 | Oluwadamilola Babajide | oluwadamilola.babajide11 | write_completion.py |  |
 
@@ -58,11 +58,28 @@ python3 -m platform.client --addr 127.0.0.1:9600 write alpha two --partitioning 
 
 ### session_models.py (Almasur Antor)
 
-**Plugin file:** session_models.py  
-**Modes we will implement:**  
-**One history we will demo:**  
-**Commands:**  
-**A mode combination that should fail, and the error Write or Read returns:**  
+**Plugin file:** session_models.py
+
+**Modes we will implement** (see that plugin's section in `week06/README.md`): READ_OWN_WRITES, MONOTONIC_READS, and NO_SESSION. All three.
+
+**One history we will demo** (the fault or change, the Writes/Reads, the bytes you expect on which node): `alpha` is pinned to n0 with DIRECTORY. The client writes `alpha=one` in session `s1` on n0, while n1 has no current copy.
+
+- READ_OWN_WRITES. n0 records the log sequence number of the successful Write for session `s1`. A Read using `s1` is sent to n1. Instead of returning n1's stale or missing value, n1 sends the Read to n0. n0 verifies that its current sequence is at least the session's write sequence and returns `one`.
+- MONOTONIC_READS. The first Read in session `s2` records the sequence seen on n0. A second Read using `s2` is sent to n1. It is served through n0 and returns the same or a newer sequence. A lower sequence is not returned.
+- NO_SESSION. A Read sent to n1 receives no extra session handling. It may return stale bytes, miss the key, or return `not owner`, depending on the normal routing and replication modes.
+- Failure. If n0 is paused or unreachable, a strict session Read fails instead of returning stale bytes from n1.
+
+The sequence number is stored separately from the value, so two Writes containing the same bytes are still different versions.
+
+**Commands** (provided client, against a `node` cluster): see the Demo section, steps 9 to 12. For example:
+
+```
+python3 -m platform.client --addr 127.0.0.1:9600 write alpha one --partitioning DIRECTORY --session-id s1 --session-models READ_OWN_WRITES
+python3 -m platform.client --addr 127.0.0.1:9601 read alpha --partitioning DIRECTORY --session-id s1 --session-models READ_OWN_WRITES
+python3 -m platform.client --addr 127.0.0.1:9601 read alpha --partitioning DIRECTORY --session-models NO_SESSION --request-routing CLIENT_AWARE
+```
+
+**A mode combination that should fail, and the error Write or Read returns:** READ_OWN_WRITES or MONOTONIC_READS without a session ID returns `ok=False error='session id required'`. If the node holding the session sequence is paused or unreachable, the Read returns `ok=False error='session unavailable'` instead of returning stale bytes.
 
 ### replication.py (Mamuna Chaudhry)
 
@@ -122,9 +139,9 @@ Each row is one fault or change and what that mode gives up compared with the ot
 
 | Mode | Fault or change | What Write does | What Read returns on which node | What you gave up |
 | --- | --- | --- | --- | --- |
-| READ_OWN_WRITES |  |  |  |  |
-| MONOTONIC_READS |  |  |  |  |
-| NO_SESSION |  |  |  |  |
+| READ_OWN_WRITES | `alpha` is pinned to n0, and `alpha=one` succeeds in session `s1` while n1 is stale or missing the key | n0 stores the bytes and records the Write's sequence number for `s1` and `alpha` | A Read sent to n1 is served through n0 and returns `one`; it fails if n0 is unreachable | Cross-node Reads need an extra RPC and lose availability when the owner is unreachable |
+| MONOTONIC_READS | Session `s2` first reads `alpha` on n0 and later sends the same Read to n1 | Writes use the normal path; the first Read records the sequence it observed | The Read sent to n1 is served through n0 and returns the same or a newer sequence; a lower sequence is refused | Reads depend on the node holding the session sequence and may fail during a pause or split |
+| NO_SESSION | n1 is behind or does not have `alpha` | The Write uses the normal completion and replication modes; no session sequence is enforced | A Read on n1 may return old bytes, miss the key, or return `not owner` | There is no read-own-writes or monotonic-read guarantee |
 
 ### request_routing.py
 
@@ -235,7 +252,44 @@ All steps use the provided client from `week06/`. The commands in steps 1 to 8 w
 
    Output: `ok=True pause=True drop_to=[] delay_ms=0`, then the first Write is `ok=False error='owner unreachable' owner=n2 acked_by=[]`, then `ok=True pause=False ...`, then the second Write is `ok=True error='' owner=n2 acked_by=['n2']`, and the Read is `value=three`.
 
-9. The other plugins add their own steps here once their code is in.
+9. READ_OWN_WRITES across nodes. Pin `alpha` to n0 on every node, replacing the earlier n2 pin, then Write on n0 and Read through n1.
+
+   ```
+   python3 -m platform.client --addr 127.0.0.1:9600 pin alpha n0 --partitioning DIRECTORY
+   python3 -m platform.client --addr 127.0.0.1:9601 pin alpha n0 --partitioning DIRECTORY
+   python3 -m platform.client --addr 127.0.0.1:9602 pin alpha n0 --partitioning DIRECTORY
+   python3 -m platform.client --addr 127.0.0.1:9600 write alpha one --partitioning DIRECTORY --session-id s1 --session-models READ_OWN_WRITES
+   python3 -m platform.client --addr 127.0.0.1:9601 read alpha --partitioning DIRECTORY --session-id s1 --session-models READ_OWN_WRITES
+   ```
+
+   Expected output: the Write succeeds on n0. The Read sent to n1 returns `ok=True found=True served_by=n0 value=one`.
+
+10. MONOTONIC_READS across nodes.
+
+   ```
+   python3 -m platform.client --addr 127.0.0.1:9600 read alpha --partitioning DIRECTORY --session-id s2 --session-models MONOTONIC_READS
+   python3 -m platform.client --addr 127.0.0.1:9601 read alpha --partitioning DIRECTORY --session-id s2 --session-models MONOTONIC_READS
+   ```
+
+   Expected output: both Reads return `one`. The second Read cannot return a sequence lower than the first.
+
+11. NO_SESSION on n1.
+
+   ```
+   python3 -m platform.client --addr 127.0.0.1:9601 read alpha --partitioning DIRECTORY --session-models NO_SESSION --request-routing CLIENT_AWARE
+   ```
+
+   Expected output: n1 returns `ok=False error='not owner'`. NO_SESSION does not add a redirect or consistency check.
+
+12. Pause the node holding the session sequence.
+
+   ```
+   python3 -m platform.client --addr 127.0.0.1:9600 fault --pause on
+   python3 -m platform.client --addr 127.0.0.1:9601 read alpha --partitioning DIRECTORY --session-id s1 --session-models READ_OWN_WRITES
+   python3 -m platform.client --addr 127.0.0.1:9600 fault --pause off
+   ```
+
+   Expected output: the Read returns `ok=False error='session unavailable'` instead of returning stale bytes from n1.
 
 ## What we are not building this week
 
