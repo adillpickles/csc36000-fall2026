@@ -13,7 +13,7 @@ Each person lists a different plugin filename.
 | Adil Ahmed | ADIL.AHMED22 | request_routing.py | adil/request_routing |
 | Amanda Farghli | Amanda.Farghli66 | partitioning.py |  |
 | Almasur Antor | almasur.antor49 | session_models.py | almasur.antor49/session_models |
-| Mamuna Chaudhry | mamuna.chaudhry91 | replication.py |  |
+| Mamuna Chaudhry | mamuna.chaudhry91 | replication.py |  mamuna.chaudhry91/replication |
 | Oluwadamilola Babajide | oluwadamilola.babajide11 | write_completion.py |  |
 
 The other five files (leader_replication.py, conflicts.py, processing_guarantees.py, leader_election.py, atomic_commit.py) are not claimed and stay as the provided stubs.
@@ -84,10 +84,15 @@ python3 -m platform.client --addr 127.0.0.1:9601 read alpha --partitioning DIREC
 ### replication.py (Mamuna Chaudhry)
 
 **Plugin file:** replication.py  
-**Modes we will implement:**  
-**One history we will demo:**  
-**Commands:**  
-**A mode combination that should fail, and the error Write or Read returns:**  
+**Modes we will implement:** (see that plugin’s section in week06/README.md) STATE, LOG, LOG_WITH_SNAPSHOT 
+**One history we will demo:**  We will pause a node that is not the owner, write alpha=one and then alpha=two on another node using --write-completion ACK_ONE. Then we will unpause the paused node and check that it catches up. With STATE, the paused node receives the latest value. With LOG, it applies both writes in order. With LOG_WITH_SNAPSHOT, we pause the node across several writes and demonstrate that a snapshot can help it catch up. The final value of alpha should match across the different nodes.
+**Commands:** (provided client, against a node cluster): pause a non-owner node, write to another node using ACK_ONE, then unpause the node and verify it catches up. The replication mode goes on the command with --replication, for example:
+```
+python3 -m platform.client --addr 127.0.0.1:9600 write alpha one --write-completion ACK_ONE --replication STATE
+python3 -m platform.client --addr 127.0.0.1:9600 write alpha two --write-completion ACK_ONE --replication LOG
+python3 -m platform.client --addr 127.0.0.1:9600 write alpha three --write-completion ACK_ONE --replication LOG_WITH_SNAPSHOT
+```
+**A mode combination that should fail, and the error Write or Read returns:**  The assignment does not specify a required failure scenario for the replication modes. 
 
 ### write_completion.py (Oluwadamilola Babajide)
 
@@ -119,9 +124,9 @@ Each row is one fault or change and what that mode gives up compared with the ot
 
 | Mode | Fault or change | What Write does | What Read returns on which node | What you gave up |
 | --- | --- | --- | --- | --- |
-| STATE |  |  |  |  |
-| LOG |  |  |  |  |
-| LOG_WITH_SNAPSHOT |  |  |  |  |
+| STATE | A non-owner node is paused while two writes update alpha from one to two | The write succeeds with ACK_ONE, and the current state is replicated rather than the sequence of operations | After the paused node catches up, a read on that node returns two | The system does not need to replicate the full sequence of operations, but it gives up the operation history needed to replay each individual write. |
+| LOG | A non-owner node is paused while two writes occur: alpha=one, followed by alpha=two | Each write succeeds with ACK_ONE, and the operations are recorded and replicated in order | After the paused node replays both operations in order, a read on that node returns two | The system preserves operation history, but it may need more storage and time to replay many operations |
+| LOG_WITH_SNAPSHOT | A non-owner node remains paused while several writes occur | Writes succeed with ACK_ONE, and the system uses operation logs and can use a snapshot to help the node catch up | After the paused node catches up, a read on that node returns the latest value, matching the other nodes | The system adds complexity by managing snapshots and logs, although snapshots can reduce the amount of history that must be replayed |
 
 ### write_completion.py
 
