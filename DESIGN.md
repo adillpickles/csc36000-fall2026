@@ -84,8 +84,11 @@ python3 -m platform.client --addr 127.0.0.1:9601 read alpha --partitioning DIREC
 ### replication.py (Mamuna Chaudhry)
 
 **Plugin file:** replication.py  
+
 **Modes we will implement:** (see that plugin’s section in week06/README.md) STATE, LOG, LOG_WITH_SNAPSHOT 
+
 **One history we will demo:**  We will pause a node that is not the owner, write alpha=one and then alpha=two on another node using --write-completion ACK_ONE. Then we will unpause the paused node and check that it catches up. With STATE, the paused node receives the latest value. With LOG, it applies both writes in order. With LOG_WITH_SNAPSHOT, we pause the node across several writes and demonstrate that a snapshot can help it catch up. The final value of alpha should match across the different nodes.
+
 **Commands:** (provided client, against a node cluster): pause a non-owner node, write to another node using ACK_ONE, then unpause the node and verify it catches up. The replication mode goes on the command with --replication, for example:
 ```
 python3 -m platform.client --addr 127.0.0.1:9600 write alpha one --write-completion ACK_ONE --replication STATE
