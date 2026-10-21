@@ -14,7 +14,7 @@ Each person lists a different plugin filename.
 | Amanda Farghli | Amanda.Farghli66 | partitioning.py |  |
 | Almasur Antor | almasur.antor49 | session_models.py | almasur.antor49/session_models |
 | Mamuna Chaudhry | mamuna.chaudhry91 | replication.py |  mamuna.chaudhry91/replication |
-| Oluwadamilola Babajide | oluwadamilola.babajide11 | write_completion.py |  |
+| Oluwadamilola Babajide | oluwadamilola.babajide11 | write_completion.py |oluwadamilola.babajide11/write_completion  |
 
 The other five files (leader_replication.py, conflicts.py, processing_guarantees.py, leader_election.py, atomic_commit.py) are not claimed and stay as the provided stubs.
 
