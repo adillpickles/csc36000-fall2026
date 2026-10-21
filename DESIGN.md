@@ -11,7 +11,7 @@ Each person lists a different plugin filename.
 | Student name | CUNY alias | Plugin filename | Feature branch |
 | --- | --- | --- | --- |
 | Adil Ahmed | ADIL.AHMED22 | request_routing.py | adil.ahmed22/request_routing |
-| Amanda Farghli | Amanda.Farghli66 | partitioning.py |  |
+| Amanda Farghli | Amanda.Farghli66 | partitioning.py | Amanda.Farghli66/partitioning |
 | Almasur Antor | almasur.antor49 | session_models.py | almasur.antor49/session_models |
 | Mamuna Chaudhry | mamuna.chaudhry91 | replication.py |  mamuna.chaudhry91/replication |
 | Oluwadamilola Babajide | oluwadamilola.babajide11 | write_completion.py |oluwadamilola.babajide11/write_completion  |
