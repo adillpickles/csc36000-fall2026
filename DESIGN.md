@@ -51,10 +51,10 @@ python3 -m platform.client --addr 127.0.0.1:9600 write alpha two --partitioning 
 ### partitioning.py (Amanda Farghli)
 
 **Plugin file:** partitioning.py  
-**Modes we will implement:**  
-**One history we will demo:**  
-**Commands:**  
-**A mode combination that should fail, and the error Write or Read returns:**  
+**Modes we will implement:**  week06/README.md): HASH_MOD, SLOTS, KEY_RANGE, DIRECTORY.
+**One history we will demo:**  (the fault or change, the Writes/Reads, the bytes you expect on which node): starting with a two-node cluster (n0, n1), we write keys across partitions, add a third node (n2), and trigger rebalancing to show how keys move or stay put.
+**Commands:**  Commands (provided client, against a node cluster): partitioned writes, node additions, and reads with --partitioning:
+**A mode combination that should fail, and the error Write or Read returns:**   Calling a write with --partitioning DIRECTORY that attempts to update a key explicitly pinned to a non-existent node returns ok=False error='unknown node'. Writing with an unsupported or missing partitioning scheme mode string raises ok=False error='unsupported partitioning mode'. Reading a key under KEY_RANGE where the range boundaries are uninitialized or disjoint returns ok=False error='unassigned key range'.
 
 ### session_models.py (Almasur Antor)
 
@@ -137,9 +137,11 @@ Each row is one fault or change and what that mode gives up compared with the ot
 
 | Mode | Fault or change | What Write does | What Read returns on which node | What you gave up |
 | --- | --- | --- | --- | --- |
-| ACK_ALL |  |  |  |  |
-| ACK_ONE |  |  |  |  |
-| ACK_QUORUM |  |  |  |  |
+| HASH_MOD | Node membership changes (e.g., adding n2 to n0, n1). | Hash modulus changes from N to N+1; writes route to the new computed owner `hash(k) % (N+1)`. | Stale or empty read on new owner until mass rebalance finishes; historical values become inaccessible on old owners without full re-hash migration. | Minimal data movement on resize: almost all existing keys (approx. N/(N+1)) remap and must be transferred across the network. |
+| KEY_RANGE | Skewed write workload / hot key range (e.g., sequential timestamps or keys sharing a common prefix). | All writes falling within the active range hammer a single target node (e.g., n0), creating a write bottleneck. | High read latency and queuing on the overloaded partition node; other nodes sit idle. | Uniform load balancing: highly susceptible to hot-spotting, unlike hash-based schemes that scatter contiguous keys. |
+| SLOTS | Node added or removed from cluster. | Routes key by hashing to a fixed slot count (S >> N), directing the write to whichever node owns that slot; only approx. 1/(N+1) slots migrate. | Consistent read once the affected slot finishes migrating to the new owner; unaffected slots read immediately with zero disruption. | Locality / efficient range queries: keys are uniformly distributed across discrete slots, requiring scatter-gather scans across nodes for range reads. |
+| DIRECTORY | Node addition or membership topology change. | Consults lookup table; honors explicit `pin` by routing the write directly to the pinned node regardless of key value or cluster size. | Returns stored value strictly from the pinned/assigned node listed in the directory tier; a stale directory cache returns `not owner`. | Zero-overhead routing: requires managing, storing, and synchronizing an explicit lookup directory/coordinator state across all nodes. |
+| ITEM | Explicit `pin` provided in request or directory tier updated. | Ignores the manual pin entirely and defaults to item/key-level deterministic mapping (e.g., hashing the key directly to determine owner). | Read returns value from the hash-determined owner, refusing to look up or return data from the manually pinned node. | Manual placement control: cannot pin specific items to dedicated physical nodes or geographic locations for regulatory or hardware affinity. |
 
 ### session_models.py
 
