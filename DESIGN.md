@@ -128,11 +128,11 @@ Each row is one fault or change and what that mode gives up compared with the ot
 
 | Mode | Fault or change | What Write does | What Read returns on which node | What you gave up |
 | --- | --- | --- | --- | --- |
-| HASH_MOD |  |  |  |  |
-| KEY_RANGE |  |  |  |  |
-| SLOTS |  |  |  |  |
-| DIRECTORY |  |  |  |  |
-| ITEM |  |  |  |  |
+| HASH_MOD | Node membership changes (e.g., adding n2 to n0, n1). | Hash modulus changes from N to N+1; writes route to the new computed owner `hash(k) % (N+1)`. | Stale or empty read on new owner until mass rebalance finishes; historical values become inaccessible on old owners without full re-hash migration. | Minimal data movement on resize: almost all existing keys (approx. N/(N+1)) remap and must be transferred across the network. |
+| KEY_RANGE | Skewed write workload / hot key range (e.g., sequential timestamps or keys sharing a common prefix). | All writes falling within the active range hammer a single target node (e.g., n0), creating a write bottleneck. | High read latency and queuing on the overloaded partition node; other nodes sit idle. | Uniform load balancing: highly susceptible to hot-spotting, unlike hash-based schemes that scatter contiguous keys. |
+| SLOTS | Node added or removed from cluster. | Routes key by hashing to a fixed slot count (S >> N), directing the write to whichever node owns that slot; only approx. 1/(N+1) slots migrate. | Consistent read once the affected slot finishes migrating to the new owner; unaffected slots read immediately with zero disruption. | Locality / efficient range queries: keys are uniformly distributed across discrete slots, requiring scatter-gather scans across nodes for range reads. |
+| DIRECTORY | Node addition or membership topology change. | Consults lookup table; honors explicit `pin` by routing the write directly to the pinned node regardless of key value or cluster size. | Returns stored value strictly from the pinned/assigned node listed in the directory tier; a stale directory cache returns `not owner`. | Zero-overhead routing: requires managing, storing, and synchronizing an explicit lookup directory/coordinator state across all nodes. |
+| ITEM | Explicit `pin` provided in request or directory tier updated. | Ignores the manual pin entirely and defaults to item/key-level deterministic mapping (e.g., hashing the key directly to determine owner). | Read returns value from the hash-determined owner, refusing to look up or return data from the manually pinned node. | Manual placement control: cannot pin specific items to dedicated physical nodes or geographic locations for regulatory or hardware affinity. |
 
 ### replication.py
 
