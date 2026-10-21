@@ -99,11 +99,24 @@ python3 -m platform.client --addr 127.0.0.1:9600 write alpha three --write-compl
 
 ### write_completion.py (Oluwadamilola Babajide)
 
-**Plugin file:** write_completion.py  
-**Modes we will implement:**  
-**One history we will demo:**  
-**Commands:**  
-**A mode combination that should fail, and the error Write or Read returns:**  
+**Plugin file:** write_completion.py
+
+**Modes we will implement** (see that plugin's section in `week06/README.md`): ACK_ALL, ACK_ONE, ACK_QUORUM. All three.
+
+**One history we will demo** (the fault or change, the Writes/Reads, the bytes you expect on which node): three nodes, the client sends a Write to `n0`, and we pause nodes to test completion requirements based on `W` (where `N=3`).
+
+- ACK_ONE. Pause `n2`. The client sends a Write to `n0`. The Write returns `ok=True` almost immediately because W=1 is met by `n0` itself. A Read on the paused node (`n2`) might return empty or stale bytes. Once `n2` is unpaused, a later Read on it repairs the copy and returns the new bytes.
+- ACK_QUORUM. W is computed as `N//2 + 1` (which is 2 for a 3-node cluster). Pause `n2` (fewer than a majority). The client sends a Write to `n0`. It returns `ok=True` because `n0` and `n1` can acknowledge it. Next, pause both `n1` and `n2`. A Write to `n0` times out and does not return `ok`. A later Read hitting only a paused node may still be old until repair.
+- ACK_ALL. Pause `n2`. The client sends a Write to `n0`. The Write does not return `ok` (it waits or times out) because W=3 cannot be satisfied. Once `n2` is unpaused, the Write completes, and a Read on `n2` is guaranteed to have the new value.
+
+**Commands** (provided client, against a node cluster): see the Demo section for exact steps. The mode goes on the command with `--write-completion`, for example:
+
+```
+python3 -m platform.client --addr 127.0.0.1:9600 write alpha one --write-completion ACK_ONE
+python3 -m platform.client --addr 127.0.0.1:9600 write alpha two --write-completion ACK_QUORUM
+python3 -m platform.client --addr 127.0.0.1:9600 write alpha three --write-completion ACK_ALL
+```
+**A mode combination that should fail, and the error Write or Read returns:** ACK_ALL with a Write while any one member node is paused/unreachable returns `ok=False` and a timeout error. ACK_QUORUM with a Write while a majority of nodes are paused (e.g., 2 out of 3 nodes) returns `ok=False` and a timeout error because the required number of acknowledgments (`N//2 + 1`) cannot be reached.
 
 ## Tradeoffs
 
