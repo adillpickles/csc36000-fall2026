@@ -51,7 +51,7 @@ class Plugin(PluginBase):
         else:
             W = 1  # default to one 
 
-        # Compute first ack (FIXED: Append to Log for Mamuna/Almasur's features)
+        # Compute first ack and append to log
         with node.lock:
             index = len(node.log)
             node.log.append((index, key, value))
@@ -76,7 +76,7 @@ class Plugin(PluginBase):
             # assign threads for each peer 
             with concurrent.futures.ThreadPoolExecutor(max_workers=len(peers)) as executor: # each peer is a thread 
                 
-                # create replicate request (FIXED: Use ReplicateRequest instead of WriteRequest)
+                # create replicate request 
                 req = node_pb2.ReplicateRequest(
                     key=key, 
                     value=value, 
@@ -87,7 +87,6 @@ class Plugin(PluginBase):
 
                 thread_to_peer = {}
                 for p in peers: 
-                    # FIXED: Send "Replicate" instead of "Write" to bypass request_routing bouncer
                     thread=executor.submit(node.rpc, p, "Replicate", req)
                     thread_to_peer[thread] = p
                 
@@ -106,7 +105,7 @@ class Plugin(PluginBase):
         if len(offline_nodes) > 0:
             with self.lock:
                 for p in offline_nodes:
-                    # Pass the index to the hint so repair can use it later
+                    # pass index to the hint so repair can use later
                     self.pending_hints.append((p, key, value, owner, index))
                         
          # check if required W acks
@@ -150,7 +149,7 @@ class Plugin(PluginBase):
                 if resp==None:
                     failed_again.append((peer, key, value, owner, index)) # if no response add to failed again list
             except Exception:
-                # Still unreachable, put it back in the queue
+                # if still unreachable, put it back in the queue
                 failed_again.append((peer, key, value, owner, index))
                 
         # Save ones that failed again for the next repair cycle
@@ -177,7 +176,6 @@ class Plugin(PluginBase):
                     
                     # if successful save and pass it over
                     if resp != None:
-                        # FIXED: Append to log on read-repair as well
                         with node.lock:
                             idx = len(node.log)
                             node.log.append((idx, request.key, resp.value))
