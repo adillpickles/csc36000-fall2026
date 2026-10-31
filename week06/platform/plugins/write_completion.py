@@ -16,6 +16,7 @@ from platform.node import Node
 from platform.util import mode, RpcFailed
 
 from .base import PluginBase
+from .replication import Plugin as ReplicationPlugin  # import replication plugin!
 
 
 class Plugin(PluginBase):
@@ -51,13 +52,9 @@ class Plugin(PluginBase):
         else:
             W = 1  # default to one 
 
-        # Compute first ack and append to log
-        with node.lock:
-            index = len(node.log)
-            node.log.append((index, key, value))
-            node.store[key] = value
-            node.last_applied = max(getattr(node, 'last_applied', -1), index)
-            
+        # Compute first ack 
+        # create and call ReplicateRequest from replication.py
+        req = ReplicationPlugin().install(node, key, value, modes)
         acks = 1 
 
         peers=[] # intilze empty server list 
@@ -71,22 +68,14 @@ class Plugin(PluginBase):
         # instlize empty list to store offline servers(nodes) as to retry later in repair function 
         offline_nodes=[]
         
-    # send data to all peers simultaneously using threads so not stuck waiting for failed nod 
+    # send data to all peers simultaneously using threads so not stuck waiting for failed node 
         if len(peers) > 0:
             # assign threads for each peer 
             with concurrent.futures.ThreadPoolExecutor(max_workers=len(peers)) as executor: # each peer is a thread 
                 
-                # create replicate request 
-                req = node_pb2.ReplicateRequest(
-                    key=key, 
-                    value=value, 
-                    index=index,
-                    kind="LOG",
-                    source=node.node_id
-                )
-
                 thread_to_peer = {}
                 for p in peers: 
+                    
                     thread=executor.submit(node.rpc, p, "Replicate", req)
                     thread_to_peer[thread] = p
                 
@@ -105,8 +94,7 @@ class Plugin(PluginBase):
         if len(offline_nodes) > 0:
             with self.lock:
                 for p in offline_nodes:
-                    # pass index to the hint so repair can use later
-                    self.pending_hints.append((p, key, value, owner, index))
+                    self.pending_hints.append((p, req))
                         
          # check if required W acks
         if acks >= W:
@@ -119,7 +107,7 @@ class Plugin(PluginBase):
         """Hinted handoff: retry copies that timed out while a peer was paused."""
         
         with self.lock:
-            # Check if list is empty (no nodes failed) 
+            # check if list empty (no nodes failed) 
             if len(self.pending_hints) == 0:
                 return 
             
@@ -134,25 +122,17 @@ class Plugin(PluginBase):
         failed_again = [] 
         
         # try to resend to nodes that were offline 
-        for peer, key, value, owner, index in hints_to_retry:
+
+        for peer, req in hints_to_retry:
             try:
-                # FIXED: Send ReplicateRequest for handoffs too
-                req = node_pb2.ReplicateRequest(
-                    key=key, 
-                    value=value, 
-                    index=index,
-                    kind="LOG",
-                    source=node.node_id
-                )
                 resp = node.rpc(peer, "Replicate", req) 
-                
                 if resp==None:
-                    failed_again.append((peer, key, value, owner, index)) # if no response add to failed again list
+                    failed_again.append((peer, req)) # if no response add to failed again list
             except Exception:
-                # if still unreachable, put it back in the queue
-                failed_again.append((peer, key, value, owner, index))
+                # still unreachable, put it back in the queue
+                failed_again.append((peer, req))
                 
-        # Save ones that failed again for the next repair cycle
+        # save ones that failed again for next repair cycle
         if failed_again:
             with self.lock:
                 self.pending_hints.extend(failed_again)
@@ -176,12 +156,8 @@ class Plugin(PluginBase):
                     
                     # if successful save and pass it over
                     if resp != None:
-                        with node.lock:
-                            idx = len(node.log)
-                            node.log.append((idx, request.key, resp.value))
-                            node.store[request.key] = resp.value
-                            node.last_applied = max(getattr(node, 'last_applied', -1), idx)
-                            
+                        # install missed read data!
+                        ReplicationPlugin().install(node, request.key, resp.value, request.modes)
                         return node_pb2.ReadResponse(value=resp.value, ok=True)
                 except Exception:
                     # if peer is offline move to next one
