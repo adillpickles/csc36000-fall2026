@@ -85,8 +85,8 @@ class Plugin(PluginBase):
 
                     try: 
                         resp=thread.result(timeout=5.0)
-                        if resp!=None:
-                            acks=acks+1
+                        if resp != None and resp.ok:
+                            acks += 1
                             
                     except Exception:
                         offline_nodes.append(p)
@@ -126,7 +126,7 @@ class Plugin(PluginBase):
         for peer, req in hints_to_retry:
             try:
                 resp = node.rpc(peer, "Replicate", req) 
-                if resp==None:
+                if resp == None or not resp.ok:
                     failed_again.append((peer, req)) # if no response add to failed again list
             except Exception:
                 # still unreachable, put it back in the queue
@@ -155,7 +155,7 @@ class Plugin(PluginBase):
                     resp = node.rpc(n, "Read", request)
                     
                     # if successful save and pass it over
-                    if resp != None:
+                    if resp != None and resp.ok:
                         # install missed read data!
                         ReplicationPlugin().install(node, request.key, resp.value, request.modes)
                         return node_pb2.ReadResponse(value=resp.value, ok=True)
