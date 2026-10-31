@@ -51,8 +51,13 @@ class Plugin(PluginBase):
         else:
             W = 1  # default to one 
 
-        # Compute first ack 
-        node.store[key] = value 
+        # Compute first ack (FIXED: Append to Log for Mamuna/Almasur's features)
+        with node.lock:
+            index = len(node.log)
+            node.log.append((index, key, value))
+            node.store[key] = value
+            node.last_applied = max(getattr(node, 'last_applied', -1), index)
+            
         acks = 1 
 
         peers=[] # intilze empty server list 
@@ -70,12 +75,20 @@ class Plugin(PluginBase):
         if len(peers) > 0:
             # assign threads for each peer 
             with concurrent.futures.ThreadPoolExecutor(max_workers=len(peers)) as executor: # each peer is a thread 
-                # create write request 
-                req=node_pb2.WriteRequest(key=key, value=value)
+                
+                # create replicate request (FIXED: Use ReplicateRequest instead of WriteRequest)
+                req = node_pb2.ReplicateRequest(
+                    key=key, 
+                    value=value, 
+                    index=index,
+                    kind="LOG",
+                    source=node.node_id
+                )
 
                 thread_to_peer = {}
                 for p in peers: 
-                    thread=executor.submit(node.rpc, p, "Write", req)
+                    # FIXED: Send "Replicate" instead of "Write" to bypass request_routing bouncer
+                    thread=executor.submit(node.rpc, p, "Replicate", req)
                     thread_to_peer[thread] = p
                 
                 #check if each thread received message 
@@ -93,7 +106,8 @@ class Plugin(PluginBase):
         if len(offline_nodes) > 0:
             with self.lock:
                 for p in offline_nodes:
-                    self.pending_hints.append((p, key, value, owner))
+                    # Pass the index to the hint so repair can use it later
+                    self.pending_hints.append((p, key, value, owner, index))
                         
          # check if required W acks
         if acks >= W:
@@ -121,16 +135,23 @@ class Plugin(PluginBase):
         failed_again = [] 
         
         # try to resend to nodes that were offline 
-        for peer, key, value, owner in hints_to_retry:
+        for peer, key, value, owner, index in hints_to_retry:
             try:
-                req = node_pb2.WriteRequest(key=key, value=value)
-                resp = node.rpc(peer, "Write", req) 
+                # FIXED: Send ReplicateRequest for handoffs too
+                req = node_pb2.ReplicateRequest(
+                    key=key, 
+                    value=value, 
+                    index=index,
+                    kind="LOG",
+                    source=node.node_id
+                )
+                resp = node.rpc(peer, "Replicate", req) 
                 
                 if resp==None:
-                    failed_again.append((peer, key, value, owner)) # if no response add to failed again list
+                    failed_again.append((peer, key, value, owner, index)) # if no response add to failed again list
             except Exception:
                 # Still unreachable, put it back in the queue
-                failed_again.append((peer, key, value, owner))
+                failed_again.append((peer, key, value, owner, index))
                 
         # Save ones that failed again for the next repair cycle
         if failed_again:
@@ -156,13 +177,16 @@ class Plugin(PluginBase):
                     
                     # if successful save and pass it over
                     if resp != None:
-                        node.store[request.key] = resp.value
+                        # FIXED: Append to log on read-repair as well
+                        with node.lock:
+                            idx = len(node.log)
+                            node.log.append((idx, request.key, resp.value))
+                            node.store[request.key] = resp.value
+                            node.last_applied = max(getattr(node, 'last_applied', -1), idx)
+                            
                         return node_pb2.ReadResponse(value=resp.value, ok=True)
                 except Exception:
                     # if peer is offline move to next one
                     continue
 
         return None # no node in the cluster actually saved the data
-
-        
-        #
