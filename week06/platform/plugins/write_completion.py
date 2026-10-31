@@ -71,7 +71,7 @@ class Plugin(PluginBase):
             # assign threads for each peer 
             with concurrent.futures.ThreadPoolExecutor(max_workers=len(peers)) as executor: # each peer is a thread 
                 # create write request 
-                req=node_pb2.WriteRequest(key=key, value=value, owner=owner)
+                req=node_pb2.WriteRequest(key=key, value=value)
 
                 thread_to_peer = {}
                 for p in peers: 
@@ -123,7 +123,7 @@ class Plugin(PluginBase):
         # try to resend to nodes that were offline 
         for peer, key, value, owner in hints_to_retry:
             try:
-                req = node_pb2.WriteRequest(key=key, value=value, owner=owner)
+                req = node_pb2.WriteRequest(key=key, value=value)
                 resp = node.rpc(peer, "Write", req) 
                 
                 if resp==None:
