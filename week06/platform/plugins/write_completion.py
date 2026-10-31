@@ -149,9 +149,9 @@ class Plugin(PluginBase):
 
         # 2. if key is missing (incomplete write) ask other nodes for the data
         curr_node = node.node_id
+        for n in node.nodes:         
             if n != curr_node:
-                try: 
-                    # ask peer if they have file
+                try:
                     resp = node.rpc(n, "Read", request)
                     
                     # if successful save and pass it over
